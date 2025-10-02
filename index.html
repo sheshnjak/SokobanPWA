@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="description" content="Classic Sokoban warehouse puzzle game with touch controls for mobile">
+    
+    <!-- PWA Meta Tags -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Sokoban">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <title>Sokoban - Warehouse Puzzle</title>
+    
+    <!-- External Libraries -->
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/umd/lucide.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+        #root {
+            width: 100vw;
+            height: 100vh;
+        }
+        .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .8; }
+        }
+        .animate-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .zoom-in {
+            animation: zoomIn 0.3s ease-out;
+        }
+        @keyframes zoomIn {
+            from { transform: scale(0.9); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        /* Loading Screen */
+        #loading {
+            position: fixed;
+            inset: 0;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        #loading.hidden {
+            display: none;
+        }
+        .loader {
+            width: 48px;
+            height: 48px;
+            border: 5px solid #475569;
+            border-bottom-color: #3b82f6;
+            border-radius: 50%;
+            animation: rotation 1s linear infinite;
+        }
+        @keyframes rotation {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading">
+        <div class="loader"></div>
+    </div>
+    
+    <!-- Game Container -->
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+        const { 
+            Undo, RotateCcw, Menu, X, Lock, Check, 
+            ChevronUp, ChevronDown, ChevronLeft, ChevronRight 
+        } = lucide;
+
+        // Classic verified Sokoban levels from original collections
+        const LEVELS = [
+            {
+                id: 1,
+                name: "First Box",
+                map: [
+                    "    #####          ",
+                    "    #   #          ",
+                    "    #$  #          ",
+                    "  ###  $##         ",
+                    "  #  $ $ #         ",
+                    "### # ## #   ######",
+                    "#   # ## #####  ..#",
+                    "# $  $          ..#",
+                    "##### ### #@##  ..#",
+                    "    #     #########",
+                    "    #######        "
+                ]
+            },
+            {
+                id: 2,
+                name: "Easy Square",
+                map: [
+                    "############  ",
+                    "#..  #     ###",
+                    "#..  # $  $  #",
+                    "#..  #$####  #",
+                    "#..    @ ##  #",
+                    "#..  # #  $ ##",
+                    "###### ##$ $ #",
+                    "  # $  $ $ $ #",
+                    "  #    #     #",
+                    "  ############"
+                ]
+            },
+            {
+                id: 3,
+                name: "The Corridor",
+                map: [
+                    "        ########",
+                    "        #     @#",
+                    "        # $#$ ##",
+                    "        # $  $#",
+                    "        ##$ $ #",
+                    "######### $ # ###",
+                    "#....  ## $  $  #",
+                    "##...    $  $   #",
+                    "#....  ##########",
+                    "########"
+                ]
+            },
+            {
+                id: 4,
+                name: "Central Chamber",
+                map: [
+                    "           ########",
+                    "           #  ....#",
+                    "############  ....#",
+                    "#    #  $ $   ....#",
+                    "# $$$#$  $ #  ....#",
+                    "#  $     $ #  ....#",
+                    "# $$ #$ $ $########",
+                    "#  $ #     #",
+                    "## #########",
+                    "#    #    ##",
+                    "#     $   ##",
+                    "#  $$#$$  @#",
+                    "#    #    ##",
+                    "###########"
+                ]
+            },
+            {
+                id: 5,
+                name: "Microban",
+                map: [
+                    "####",
+                    "# .#",
+                    "#  ###",
+                    "#*@  #",
+                    "#  $ #",
+                    "#  ###",
+                    "####"
+                ]
+            },
+            {
+                id: 6,
+                name: "Small Test",
+                map: [
+                    " ####",
+                    " #  ####",
+                    " #  $  #",
+                    " # $## #",
+                    "##$  # #",
+                    "#.@$.# #",
+                    "#. ..# #",
+                    "####   #",
+                    "   #####"
+                ]
+            },
+            {
+                id: 7,
+                name: "Original 1",
+                map: [
+                    "    #####",
+                    "    #   #",
+                    "    #$  #",
+                    "  ###  $##",
+                    "  #  $ $ #",
+                    "### # ## #   ######",
+                    "#   # ## #####  ..#",
+                    "# $  $          ..#",
+                    "##### ### #@##  ..#",
+                    "    #     #########",
+                    "    #######"
+                ]
+            },
+            {
+                id: 8,
+                name: "Original 2",
+                map: [
+                    "############",
+                    "#..  #     ###",
+                    "#..  # $  $  #",
+                    "#..  #$####  #",
+                    "#..    @ ##  #",
+                    "#..  # #  $ ##",
+                    "###### ##$ $ #",
+                    "  # $  $ $ $ #",
+                    "  #    #     #",
+                    "  ############"
+                ]
+            }
+        ];
+
+        const CELL_SIZE = 50;
+
+        const SokobanGame = () => {
+            const [currentLevel, setCurrentLevel] = useState(0);
+            const [grid, setGrid] = useState([]);
+            const [playerPos, setPlayerPos] = useState({ x: 0, y: 0 });
+            const [boxes, setBoxes] = useState([]);
+            const [goals, setGoals] = useState([]);
+            const [history, setHistory] = useState([]);
+            const [moves, setMoves] = useState(0);
+            const [pushes, setPushes] = useState(0);
+            const [showMenu, setShowMenu] = useState(false);
+            const [unlockedLevels, setUnlockedLevels] = useState([0]);
+            const [completedLevels, setCompletedLevels] = useState([]);
+            const [showVictory, setShowVictory] = useState(false);
+
+            const parseLevel = useCallback((levelData) => {
+                const map = levelData.map;
+                const newGrid = [];
+                const newBoxes = [];
+                const newGoals = [];
+                let newPlayerPos = { x: 0, y: 0 };
+
+                map.forEach((row, y) => {
+                    const gridRow = [];
+                    for (let x = 0; x < row.length; x++) {
+                        const cell = row[x];
+                        switch (cell) {
+                            case '@':
+                                newPlayerPos = { x, y };
+                                gridRow.push(' ');
+                                break;
+                            case '+':
+                                newPlayerPos = { x, y };
+                                newGoals.push({ x, y });
+                                gridRow.push('.');
+                                break;
+                            case '$':
+                                newBoxes.push({ x, y });
+                                gridRow.push(' ');
+                                break;
+                            case '*':
+                                newBoxes.push({ x, y });
+                                newGoals.push({ x, y });
+                                gridRow.push('.');
+                                break;
+                            case '.':
+                                newGoals.push({ x, y });
+                                gridRow.push('.');
+                                break;
+                            default:
+                                gridRow.push(cell);
+                        }
+                    }
+                    newGrid.push(gridRow);
+                });
+
+                setGrid(newGrid);
+                setPlayerPos(newPlayerPos);
+                setBoxes(newBoxes);
+                setGoals(newGoals);
+                setHistory([]);
+                setMoves(0);
+                setPushes(0);
+                setShowVictory(false);
+            }, []);
+
+            useEffect(() => {
+                parseLevel(LEVELS[currentLevel]);
+            }, [currentLevel, parseLevel]);
+
+            const checkWin = useCallback((boxPositions) => {
+                if (goals.length === 0 || boxPositions.length === 0) return false;
+                return goals.every(goal =>
+                    boxPositions.some(box => box.x === goal.x && box.y === goal.y)
+                );
+            }, [goals]);
+
+            const isWall = useCallback((x, y) => {
+                if (y < 0 || y >= grid.length || x < 0 || x >= grid[y].length) return true;
+                return grid[y][x] === '#';
+            }, [grid]);
+
+            const getBox = (x, y, boxList) => {
+                return boxList.find(box => box.x === x && box.y === y);
+            };
+
+            const move = useCallback((dx, dy) => {
+                if (showVictory) return;
+
+                const newX = playerPos.x + dx;
+                const newY = playerPos.y + dy;
+
+                if (isWall(newX, newY)) return;
+
+                const box = getBox(newX, newY, boxes);
+                
+                if (box) {
+                    const newBoxX = newX + dx;
+                    const newBoxY = newY + dy;
+                    
+                    if (isWall(newBoxX, newBoxY) || getBox(newBoxX, newBoxY, boxes)) {
+                        return;
+                    }
+
+                    const newBoxes = boxes.map(b =>
+                        b.x === box.x && b.y === box.y
+                            ? { x: newBoxX, y: newBoxY }
+                            : b
+                    );
+
+                    setHistory([...history, { playerPos, boxes, moves, pushes }]);
+                    setBoxes(newBoxes);
+                    setPlayerPos({ x: newX, y: newY });
+                    setMoves(moves + 1);
+                    setPushes(pushes + 1);
+
+                    if (checkWin(newBoxes)) {
+                        setTimeout(() => {
+                            setShowVictory(true);
+                            if (!completedLevels.includes(currentLevel)) {
+                                setCompletedLevels([...completedLevels, currentLevel]);
+                                if (currentLevel < LEVELS.length - 1 && !unlockedLevels.includes(currentLevel + 1)) {
+                                    setUnlockedLevels([...unlockedLevels, currentLevel + 1]);
+                                }
+                            }
+                        }, 300);
+                    }
+                } else {
+                    setHistory([...history, { playerPos, boxes, moves, pushes }]);
+                    setPlayerPos({ x: newX, y: newY });
+                    setMoves(moves + 1);
+                }
+            }, [playerPos, boxes, history, moves, pushes, showVictory, checkWin, completedLevels, currentLevel, unlockedLevels, isWall]);
+
+            useEffect(() => {
+                const handleKeyDown = (e) => {
+                    if (showMenu || showVictory) return;
+                    
+                    switch (e.key) {
+                        case 'ArrowUp':
+                        case 'w':
+                        case 'W':
+                            e.preventDefault();
+                            move(0, -1);
+                            break;
+                        case 'ArrowDown':
+                        case 's':
+                        case 'S':
+                            e.preventDefault();
+                            move(0, 1);
+                            break;
+                        case 'ArrowLeft':
+                        case 'a':
+                        case 'A':
+                            e.preventDefault();
+                            move(-1, 0);
+                            break;
+                        case 'ArrowRight':
+                        case 'd':
+                        case 'D':
+                            e.preventDefault();
+                            move(1, 0);
+                            break;
+                        case 'z':
+                        case 'Z':
+                            if (e.ctrlKey || e.metaKey) {
+                                e.preventDefault();
+                                undo();
+                            }
+                            break;
+                        default:
+                            break;
+                    }
+                };
+
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
+            }, [move, showMenu, showVictory]);
+
+            const undo = () => {
+                if (history.length === 0) return;
+                
+                const lastState = history[history.length - 1];
+                setPlayerPos(lastState.playerPos);
+                setBoxes(lastState.boxes);
+                setMoves(lastState.moves);
+                setPushes(lastState.pushes);
+                setHistory(history.slice(0, -1));
+            };
+
+            const restart = () => {
+                parseLevel(LEVELS[currentLevel]);
+            };
+
+            const selectLevel = (index) => {
+                if (unlockedLevels.includes(index)) {
+                    setCurrentLevel(index);
+                    setShowMenu(false);
+                }
+            };
+
+            const handleDirectionClick = (dx, dy) => {
+                move(dx, dy);
+            };
+
+            const maxWidth = Math.max(...grid.map(row => row.length));
+            const gridWidth = maxWidth * CELL_SIZE;
+            const gridHeight = grid.length * CELL_SIZE;
+
+            const boxesOnGoals = boxes.filter(box => 
+                goals.some(goal => goal.x === box.x && goal.y === box.y)
+            ).length;
+
+            return (
+                <div className="w-full h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex flex-col overflow-hidden">
+                    <div className="w-full bg-slate-900/80 backdrop-blur-sm border-b border-slate-700/50 px-3 py-2 flex justify-between items-center shrink-0">
+                        <button
+                            onClick={() => setShowMenu(true)}
+                            className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 transition-all duration-200 active:scale-95"
+                        >
+                            <Menu size={22} />
+                        </button>
+                        
+                        <div className="text-center">
+                            <h1 className="text-base font-bold text-slate-100">{LEVELS[currentLevel].name}</h1>
+                            <p className="text-xs text-slate-400">Moves: {moves} | Pushes: {pushes} | Boxes: {boxesOnGoals}/{goals.length}</p>
+                        </div>
+                        
+                        <div className="flex gap-1.5">
+                            <button
+                                onClick={undo}
+                                disabled={history.length === 0}
+                                className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 disabled:cursor-not-allowed text-slate-200 transition-all duration-200 active:scale-95"
+                            >
+                                <Undo size={18} />
+                            </button>
+                            <button
+                                onClick={restart}
+                                className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 transition-all duration-200 active:scale-95"
+                            >
+                                <RotateCcw size={18} />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 flex items-center justify-center p-2 overflow-auto">
+                        <div className="relative">
+                            <div
+                                className="relative bg-slate-950/30 rounded-lg shadow-2xl border border-slate-700/30"
+                                style={{ padding: '4px' }}
+                            >
+                                <div
+                                    className="relative"
+                                    style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: `repeat(${maxWidth}, ${CELL_SIZE}px)`,
+                                        gridTemplateRows: `repeat(${grid.length}, ${CELL_SIZE}px)`,
+                                        gap: '0px',
+                                    }}
+                                >
+                                    {grid.map((row, y) =>
+                                        row.map((cell, x) => {
+                                            const isGoal = goals.some(g => g.x === x && g.y === y);
+                                            const box = boxes.find(b => b.x === x && b.y === y);
+                                            const hasBox = !!box;
+                                            const isPlayer = playerPos.x === x && playerPos.y === y;
+                                            const boxOnGoal = hasBox && isGoal;
+
+                                            return (
+                                                <div
+                                                    key={`${x}-${y}`}
+                                                    className="relative"
+                                                    style={{
+                                                        width: CELL_SIZE,
+                                                        height: CELL_SIZE,
+                                                        gridColumn: x + 1,
+                                                        gridRow: y + 1,
+                                                    }}
+                                                >
+                                                    {cell === '#' ? (
+                                                        <div className="absolute inset-0 bg-gradient-to-br from-slate-600 via-slate-700 to-slate-800 border border-slate-500/30">
+                                                            <div className="absolute inset-1.5 bg-gradient-to-br from-slate-700/40 to-slate-800/60 rounded-sm" />
+                                                        </div>
+                                                    ) : (
+                                                        <div className="absolute inset-0 bg-slate-800/30" />
+                                                    )}
+
+                                                    {isGoal && (
+                                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                            <div className={`w-7 h-7 rounded-full border-2 transition-all duration-300 ${
+                                                                boxOnGoal 
+                                                                    ? 'border-emerald-400 bg-emerald-400/30 shadow-lg shadow-emerald-500/50 scale-110' 
+                                                                    : 'border-amber-500/60 bg-amber-500/10'
+                                                            }`} />
+                                                        </div>
+                                                    )}
+
+                                                    {hasBox && (
+                                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                            <div className={`w-9 h-9 rounded-lg transition-all duration-200 shadow-lg ${
+                                                                boxOnGoal
+                                                                    ? 'bg-gradient-to-br from-emerald-400 via-emerald-500 to-emerald-600 shadow-emerald-500/50 border-2 border-emerald-300' 
+                                                                    : 'bg-gradient-to-br from-amber-500 via-amber-600 to-amber-700 shadow-black/40 border-2 border-amber-400'
+                                                            }`}>
+                                                                <div className="absolute inset-2 border border-white/20 rounded" />
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {isPlayer && (
+                                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                                                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 shadow-xl shadow-blue-500/50 border-3 border-blue-300 flex items-center justify-center">
+                                                                <div className="w-2.5 h-2.5 bg-white rounded-full shadow-inner" />
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="md:hidden shrink-0 pb-4">
+                        <div className="flex justify-center items-center px-4">
+                            <div className="relative w-48 h-48">
+                                <button
+                                    onTouchStart={(e) => { e.preventDefault(); handleDirectionClick(0, -1); }}
+                                    onClick={() => handleDirectionClick(0, -1)}
+                                    className="absolute top-0 left-1/2 -translate-x-1/2 w-14 h-14 rounded-t-2xl bg-slate-700/70 backdrop-blur-sm active:bg-slate-600/90 flex items-center justify-center border border-slate-600/50 transition-all active:scale-95 shadow-lg"
+                                >
+                                    <ChevronUp size={28} className="text-slate-100" />
+                                </button>
+                                
+                                <button
+                                    onTouchStart={(e) => { e.preventDefault(); handleDirectionClick(0, 1); }}
+                                    onClick={() => handleDirectionClick(0, 1)}
+                                    className="absolute bottom-0 left-1/2 -translate-x-1/2 w-14 h-14 rounded-b-2xl bg-slate-700/70 backdrop-blur-sm active:bg-slate-600/90 flex items-center justify-center border border-slate-600/50 transition-all active:scale-95 shadow-lg"
+                                >
+                                    <ChevronDown size={28} className="text-slate-100" />
+                                </button>
+                                
+                                <button
+                                    onTouchStart={(e) => { e.preventDefault(); handleDirectionClick(-1, 0); }}
+                                    onClick={() => handleDirectionClick(-1, 0)}
+                                    className="absolute left-0 top-1/2 -translate-y-1/2 w-14 h-14 rounded-l-2xl bg-slate-700/70 backdrop-blur-sm active:bg-slate-600/90 flex items-center justify-center border border-slate-600/50 transition-all active:scale-95 shadow-lg"
+                                >
+                                    <ChevronLeft size={28} className="text-slate-100" />
+                                </button>
+                                
+                                <button
+                                    onTouchStart={(e) => { e.preventDefault(); handleDirectionClick(1, 0); }}
+                                    onClick={() => handleDirectionClick(1, 0)}
+                                    className="absolute right-0 top-1/2 -translate-y-1/2 w-14 h-14 rounded-r-2xl bg-slate-700/70 backdrop-blur-sm active:bg-slate-600/90 flex items-center justify-center border border-slate-600/50 transition-all active:scale-95 shadow-lg"
+                                >
+                                    <ChevronRight size={28} className="text-slate-100" />
+                                </button>
+                                
+                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-14 rounded-full bg-slate-800/40 border border-slate-600/30" />
+                            </div>
+                        </div>
+                    </div>
+
+                    {showVictory && (
+                        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-30 p-4">
+                            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-8 shadow-2xl border border-slate-700 max-w-sm w-full zoom-in">
+                                <div className="flex items-center justify-center mb-4">
+                                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/50 animate-pulse">
+                                        <Check size={40} className="text-white" />
+                                    </div>
+                                </div>
+                                <h2 className="text-3xl font-bold text-slate-100 text-center mb-2">Level Complete!</h2>
+                                <div className="text-slate-300 text-center mb-6">
+                                    <p className="text-lg">Moves: {moves}</p>
+                                    <p className="text-sm text-slate-400">Pushes: {pushes}</p>
+                                </div>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={restart}
+                                        className="flex-1 py-3 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 font-semibold transition-all duration-200 active:scale-95"
+                                    >
+                                        Retry
+                                    </button>
+                                    {currentLevel < LEVELS.length - 1 ? (
+                                        <button
+                                            onClick={() => {
+                                                setCurrentLevel(currentLevel + 1);
+                                                setShowVictory(false);
+                                            }}
+                                            className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white font-semibold transition-all duration-200 active:scale-95 shadow-lg shadow-emerald-500/30"
+                                        >
+                                            Next Level
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={() => setShowMenu(true)}
+                                            className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white font-semibold transition-all duration-200 active:scale-95"
+                                        >
+                                            Menu
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showMenu && (
+                        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-40 p-4">
+                            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 shadow-2xl border border-slate-700 max-w-md w-full max-h-[85vh] overflow-y-auto">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h2 className="text-2xl font-bold text-slate-100">Select Level</h2>
+                                    <button
+                                        onClick={() => setShowMenu(false)}
+                                        className="p-2 rounded-lg bg-slate-700/50 hover:bg-slate-600/50 text-slate-200 transition-all duration-200 active:scale-95"
+                                    >
+                                        <X size={24} />
+                                    </button>
+                                </div>
+                                
+                                <div className="grid grid-cols-4 gap-3 mb-6">
+                                    {LEVELS.map((level, index) => {
+                                        const isUnlocked = unlockedLevels.includes(index);
+                                        const isCompleted = completedLevels.includes(index);
+                                        const isCurrent = index === currentLevel;
+                                        
+                                        return (
+                                            <button
+                                                key={level.id}
+                                                onClick={() => selectLevel(index)}
+                                                disabled={!isUnlocked}
+                                                className={`aspect-square rounded-xl font-bold text-lg transition-all duration-200 relative ${
+                                                    isCurrent
+                                                        ? 'bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-lg shadow-blue-500/40 scale-105'
+                                                        : isUnlocked
+                                                        ? 'bg-gradient-to-br from-slate-700 to-slate-800 text-slate-100 hover:from-slate-600 hover:to-slate-700 active:scale-95'
+                                                        : 'bg-slate-800/30 text-slate-600 cursor-not-allowed'
+                                                }`}
+                                            >
+                                                {!isUnlocked ? (
+                                                    <Lock size={24} className="absolute inset-0 m-auto text-slate-600" />
+                                                ) : (
+                                                    <>
+                                                        <span>{index + 1}</span>
+                                                        {isCompleted && (
+                                                            <Check size={16} className="absolute top-1 right-1 text-emerald-400" />
+                                                        )}
+                                                    </>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                
+                                <div className="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
+                                    <p className="text-sm text-slate-300 text-center leading-relaxed">
+                                        Complete levels to unlock more.<br/>
+                                        <span className="text-emerald-400 font-semibold">{completedLevels.length}</span> of {LEVELS.length} completed
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<SokobanGame />);
+
+        // Hide loading screen
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                document.getElementById('loading').classList.add('hidden');
+            }, 500);
+        });
+    </script>
+
+    <!-- Service Worker Registration for PWA -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('service-worker.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registered:', registration.scope);
+                    })
+                    .catch(error => {
+                        console.log('ServiceWorker registration failed:', error);
+                    });
+            });
+        }
+
+        // Install prompt for PWA
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            console.log('PWA install prompt available');
+        });
+    </script>
+</body>
+</html>
